@@ -6,19 +6,16 @@ import com.braintech.nimbitelegram.payload.*;
 import com.braintech.nimbitelegram.repository.PendingPurchaseOrdersRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.boot.ApplicationArguments;
-import org.springframework.boot.ApplicationRunner;
 import org.springframework.scheduling.annotation.EnableScheduling;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
-import reactor.core.publisher.Mono;
 
-import java.time.*;
+import java.time.Duration;
+import java.time.LocalDateTime;
+import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.ArrayList;
-import java.util.Date;
-import java.util.List;
-import java.util.Optional;
+import java.util.*;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
@@ -26,27 +23,7 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 @EnableScheduling
 @Component
-/**
- * Atenção: um registro PurchaseOrder (MongoDB) possui o campo 'purchaseOrderDTO' que não possui detalhes do pedido.
- * Quem possui detalhes é o PurchaseOrderDetailedDTO (que tem o campo 'documentFormCode' (enum já declarado)
- * O método que busca um 'purchaseOrder' específico é o NimbiComprasClient::findPurchaseOrder(Long purchaseOrderId)
- *
- * Guardar cada PurchaseOrder pendente e filtrado, para poder enriquecer as notificações.
- *
- *
- * Lógica:
- * + Desmarca todos os registros do repositório local de pendências como PENDING = false
- * + Faz a carga dos purchaseOrders pendentes (PENDING_APPROVAL) desde a data inicial (Jan/2022)
- * + Filtra essa lista de pendentes (updateDate maior que o MAX_WAIT)
- * - Busca cada pedido da lista no repositório local de pendências
- *   - Se encontra, marca como PENDING
- *   - Se não encontra, busca detalhes do pedido, filtra por DocumentFormCode e guarda no repositório local de pendências, marcando como PENDING
- * - Remove todos os registros que restaram com PENDING = false
- *
- * - Envia notificação com a lista de pedidos de compra pendentes
- *
- */
-public class CheckPendingApprovalsService implements ApplicationRunner {
+public class CheckPendingApprovalsService {
 
     private final BotTelegramClient botTelegramClient;
 
@@ -58,21 +35,24 @@ public class CheckPendingApprovalsService implements ApplicationRunner {
     private final int MAX_WAIT_HOURS = 12;
 
 
-//    @Scheduled(fixedRate = 1, timeUnit = TimeUnit.MINUTES)
-//    @Scheduled(cron = "0 0 8-20/2 * * MON-FRI")
-    private void executeSendMessage() {
-        var message = "Pedidos assistenciais pendentes há mais de 12h: ";
-        // .collect(Collectors.joining(',')); OU String.join(",", lista);
-        var responseSendMessageTelegramDTO = botTelegramClient.sendMessageToMonitores(message).block();
-        log.debug(responseSendMessageTelegramDTO.toString());
+    @Scheduled(cron = "0 0 8-20/2 * * MON-FRI")
+    public void checkPendingApprovals() {
+        var pendingApprovalList = fetchPurchaseOrdersFromNimbi(OrderStatus.PENDING_APPROVAL);
+
+        List<PurchaseOrderDetailedDTO> detailedFiltered = getPurchaseOrdersDetailedFiltered(pendingApprovalList);
+
+        if (!detailedFiltered.isEmpty()) {
+            executeSendMessage(detailedFiltered);
+            savePendingPurchaserOrders(detailedFiltered);
+        }
     }
 
-//    @Scheduled(fixedRate = 60, timeUnit = TimeUnit.MINUTES)
-//    @Scheduled(cron = "0 0 8-20/2 * * MON-FRI")
-//    private void executeLoadFromNimbi() {
-//        var lista = loadFromNimbi(OrderStatus.PENDING_APPROVAL);
-//        log.info(String.valueOf(lista.isEmpty()));
-//    }
+    private void executeSendMessage(List<PurchaseOrderDetailedDTO> detailedFiltered) {
+        StringBuilder sb = new StringBuilder("Pedidos assistenciais pendentes há mais de 12h: ");
+        sb.append(detailedFiltered.stream().map(PurchaseOrderDetailedDTO::getId).map(String::valueOf).collect(Collectors.joining(",")));
+        var responseSendMessageTelegramDTO = botTelegramClient.sendMessageToMonitores(sb.toString()).block();
+        log.debug(responseSendMessageTelegramDTO.toString());
+    }
 
     private List<PurchaseOrderDTO> fetchPurchaseOrdersFromNimbi(OrderStatus orderStatus) {
 
@@ -132,53 +112,34 @@ public class CheckPendingApprovalsService implements ApplicationRunner {
                 .collect(Collectors.toList());
     }
 
-    @Override
-    public void run(ApplicationArguments args) throws Exception {
-        var pendingApprovalList = fetchPurchaseOrdersFromNimbi(OrderStatus.PENDING_APPROVAL);
-        if (pendingPurchaseOrdersRepository.count().block() > 0) {
-//            pendingPurchaseOrdersRepository.findAll().subscribe(pendingPurchaseOrder -> {
-//                pendingPurchaseOrder.setPending(false);
-//                pendingPurchaseOrdersRepository.save(pendingPurchaseOrder);
-//            });
-            // Remove da 'pendingApprovalList' todos os que já estão em pendingPurchaseOrdersRepository
-            pendingApprovalList.forEach(purchaseOrderDTO -> {
-                var pendingApprovalPurchaseOrder = pendingPurchaseOrdersRepository.findById(purchaseOrderDTO.getId()).block();
-                if (Optional.ofNullable(pendingApprovalPurchaseOrder).isPresent()) {
-                    pendingApprovalList.remove(purchaseOrderDTO);
-                }
-            });
-        }
-
-        List<PurchaseOrderDetailedDTO> detailedFiltered = getPurchaseOrdersDetailedFiltered(pendingApprovalList);
-
-        if (!detailedFiltered.isEmpty()) {
-            executeSendMessage();
-            savePendingPurchaserOrders(detailedFiltered);
-        }
-    }
-
     private void savePendingPurchaserOrders(List<PurchaseOrderDetailedDTO> purchaseOrderDetailedDTOList) {
         var idSupplier = getIdSequenceSupplier();
 
         Flux.fromStream(
                 purchaseOrderDetailedDTOList.stream().map(purchaseOrderDetailedDTO -> {
+                    String id;
+                    var pendingApprovalPurchaseOrder = pendingPurchaseOrdersRepository
+                            .findByPurchaseOrderDetailedDTO_Id(purchaseOrderDetailedDTO.getId()).block();
+                    if (Objects.nonNull(pendingApprovalPurchaseOrder)) {
+                        id = pendingApprovalPurchaseOrder.getId();
+                    } else {
+                        id = idSupplier.get();
+                    }
                     return pendingPurchaseOrdersRepository
-                            .save(new PendingPurchaseOrders(idSupplier.get(), new Date(), purchaseOrderDetailedDTO));
+                            .save(new PendingPurchaseOrders(id, new Date(), purchaseOrderDetailedDTO));
                 })
-        ).subscribe(m -> log.info("New pending purchase order saved: {}", m.block()));
+        ).subscribe(m -> log.info("Pending purchase order saved: {}", m.block()));
         log.info("Repository contains now {} entries.", pendingPurchaseOrdersRepository.count().block());
     }
 
     private Supplier<String> getIdSequenceSupplier() {
         return new Supplier<>() {
-            Long l = 0L;
+            Long l = pendingPurchaseOrdersRepository.count().block();
 
             @Override
             public String get() {
-                // adds padding zeroes
                 return String.format("%06d", l++);
             }
         };
     }
-
 }

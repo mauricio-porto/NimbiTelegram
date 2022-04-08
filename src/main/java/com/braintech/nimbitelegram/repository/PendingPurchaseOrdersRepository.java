@@ -11,4 +11,6 @@ public interface PendingPurchaseOrdersRepository extends ReactiveSortingReposito
     Flux<PendingPurchaseOrders> findAllByIdNotNullOrderByIdAsc(final Pageable page);
 
     Mono<PendingPurchaseOrders> findById(Long id);
+
+    Mono<PendingPurchaseOrders> findByPurchaseOrderDetailedDTO_Id(Long id);
 }
