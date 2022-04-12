@@ -36,6 +36,7 @@ public class CheckPendingApprovalsService {
 
 
     @Scheduled(cron = "0 0 8-20/2 * * MON-FRI")
+//    @Scheduled(cron = "0 */2 * * * MON-FRI")
     public void checkPendingApprovals() {
         var pendingApprovalList = fetchPurchaseOrdersFromNimbi(OrderStatus.PENDING_APPROVAL);
 
@@ -44,11 +45,13 @@ public class CheckPendingApprovalsService {
         if (!detailedFiltered.isEmpty()) {
             executeSendMessage(detailedFiltered);
             savePendingPurchaserOrders(detailedFiltered);
+        } else {
+            log.info("No pending approvals this time.");
         }
     }
 
     private void executeSendMessage(List<PurchaseOrderDetailedDTO> detailedFiltered) {
-        StringBuilder sb = new StringBuilder("Pedidos assistenciais pendentes há mais de 12h: ");
+        StringBuilder sb = new StringBuilder("Pedidos pendentes há mais de 12h: ");
         sb.append(detailedFiltered.stream().map(PurchaseOrderDetailedDTO::getId).map(String::valueOf).collect(Collectors.joining(",")));
         var responseSendMessageTelegramDTO = botTelegramClient.sendMessageToMonitores(sb.toString()).block();
         log.debug(responseSendMessageTelegramDTO.toString());
@@ -89,7 +92,7 @@ public class CheckPendingApprovalsService {
             purchaseOrders = nimbiComprasClient.findPurchaseOrders(purchaseOrdersRequestDTO).block().getPurchaseOrders()
                     .stream()
                     .filter(purchaseOrderDTO -> {
-                        return Duration.between(now, LocalDateTime.parse(purchaseOrderDTO.getUpdateDate())).toHours() > MAX_WAIT_HOURS;
+                        return Duration.between(ZonedDateTime.parse(purchaseOrderDTO.getUpdateDate()), now).toHours() > MAX_WAIT_HOURS;
                     }).collect(Collectors.toList());
             if (!purchaseOrders.isEmpty()) {
                 purchaseOrderDTOList.addAll(purchaseOrders);

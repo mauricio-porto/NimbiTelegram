@@ -17,5 +17,4 @@ public class PendingPurchaseOrders {
     private String id;
     private Date createdDate;
     private PurchaseOrderDetailedDTO purchaseOrderDetailedDTO;
-//    private Boolean pending;
 }

@@ -28,6 +28,7 @@ public class BotTelegramClient {
                                 .path(botTelegramClientConfig.getSendMessageUri())
                                 .queryParam("chat_id", botTelegramClientConfig.getMonitoresUnimedChatId())
                                 .queryParam("text", message)
+                                .queryParam("protect_content", true)
                                 .build())
                 .retrieve()
                 .onStatus(HttpStatus.NOT_FOUND::equals, response -> Mono.empty())
