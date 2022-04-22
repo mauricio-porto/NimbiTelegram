@@ -10,6 +10,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.http.client.reactive.ReactorClientHttpConnector;
 import org.springframework.web.reactive.function.client.ExchangeStrategies;
 import org.springframework.web.reactive.function.client.WebClient;
+import reactor.netty.http.client.HttpClient;
 
 @RequiredArgsConstructor
 @Getter
@@ -32,9 +33,9 @@ public class BotTelegramClientConfig {
     @Qualifier("botTelegramWebClient")
     public WebClient getBotTelegramWebClient() {
         return WebClient.builder()
-                .clientConnector(new ReactorClientHttpConnector())
-                .codecs(clientCodecConfigurer -> clientCodecConfigurer.defaultCodecs())
-                .exchangeStrategies(ExchangeStrategies.withDefaults())
+                .clientConnector(new ReactorClientHttpConnector(HttpClient.newConnection()))
+//                .codecs(clientCodecConfigurer -> clientCodecConfigurer.defaultCodecs())
+//                .exchangeStrategies(ExchangeStrategies.withDefaults())
                 .baseUrl(serverUrl)
                 .build();
     }
