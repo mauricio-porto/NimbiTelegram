@@ -6,11 +6,14 @@ import com.braintech.nimbitelegram.payload.*;
 import com.braintech.nimbitelegram.repository.PendingPurchaseOrdersRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.ApplicationArguments;
+import org.springframework.boot.ApplicationRunner;
 import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
 
+import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.ZonedDateTime;
@@ -23,12 +26,14 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 @EnableScheduling
 @Component
-public class CheckPendingApprovalsService {
+public class CheckPendingApprovalsService implements ApplicationRunner {
 
     private final BotTelegramClient botTelegramClient;
 
     private final PendingPurchaseOrdersRepository pendingPurchaseOrdersRepository;
     private final NimbiComprasClient nimbiComprasClient;
+
+    private final NimbiComprasService nimbiComprasService;
 
     private final Long recordId = 0L;
 
@@ -144,5 +149,14 @@ public class CheckPendingApprovalsService {
                 return String.format("%06d", l++);
             }
         };
+    }
+
+    @Override
+    public void run(ApplicationArguments args) throws Exception {
+        PendingPurchaseOrders first = nimbiComprasService.findLatest();
+        log.info(first.toString());
+
+        List<PendingPurchaseOrders> pendingPurchaseOrdersList = nimbiComprasService.getPendingApprovalsForUpdateTime(first.getCreatedDate()).collectSortedList().block();
+        log.info(String.valueOf(pendingPurchaseOrdersList.isEmpty()));
     }
 }
