@@ -6,5 +6,4 @@ import org.springframework.data.repository.reactive.ReactiveSortingRepository;
 import reactor.core.publisher.Flux;
 
 public interface PurchaseOrdersRepository extends ReactiveSortingRepository<PurchaseOrders, String> {
-    Flux<PurchaseOrders> findAllByIdNotNullOrderByIdAsc(final Pageable page);
 }
